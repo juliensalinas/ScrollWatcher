@@ -1,0 +1,7 @@
+# Documented versions (plugins/deps are declared directly in build.gradle.kts for AGP 9).
+[versions]
+agp = "9.4.1"
+kotlin = "2.4.20"
+compileSdk = "35"
+targetSdk = "35"
+minSdk = "26"

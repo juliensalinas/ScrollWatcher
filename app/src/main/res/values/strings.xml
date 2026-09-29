@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ScrollWatcher</string>
+    <string name="notification_channel_name">Scroll monitoring</string>
+    <string name="notification_channel_desc">Persistent notification while ScrollWatcher tracks your doom-scroll budget.</string>
+    <string name="notification_title">ScrollWatcher is monitoring</string>
+    <string name="notification_text">Tracking evil-app usage against your daily budget</string>
+    <string name="overlay_title">Daily scroll budget used</string>
+    <string name="overlay_subtitle">Take a breath. Your marked apps are locked until midnight or you add time.</string>
+    <string name="overlay_remaining_zero">Remaining: 0:00</string>
+    <string name="overlay_open_app">Open ScrollWatcher</string>
+</resources>
