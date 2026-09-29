@@ -129,8 +129,9 @@ class ScrollMonitorService : Service() {
                 val elapsed = (now - lastTick).coerceAtLeast(0L).coerceAtMost(POLL_INTERVAL_MS * 2)
                 lastTick = now
 
-                val interactive =
-                    screenOn && PermissionHelper.isScreenInteractive(this@ScrollMonitorService)
+                // Prefer live PowerManager state; keep screenOn as a fast path from broadcasts.
+                val interactive = PermissionHelper.isScreenInteractive(this@ScrollMonitorService)
+                if (interactive) screenOn = true
                 val hasUsage = PermissionHelper.hasUsageAccess(this@ScrollMonitorService)
 
                 if (interactive && hasUsage) {
