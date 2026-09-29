@@ -4,31 +4,61 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import com.juliensalinas.scrollwatcher.R
 import com.juliensalinas.scrollwatcher.ui.MainActivity
 
 /**
  * SYSTEM_ALERT_WINDOW full-screen overlay shown when the daily scroll budget is exhausted
  * and an evil app is in the foreground.
+ *
+ * WindowManager add/remove must run on the main thread; callers may invoke from any thread.
  */
 class LockOverlay(private val context: Context) {
 
     private val windowManager =
         context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var rootView: FrameLayout? = null
 
     val isShowing: Boolean get() = rootView != null
 
     fun show() {
-        if (rootView != null) return
-        if (!android.provider.Settings.canDrawOverlays(context)) return
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            showOnMain()
+        } else {
+            mainHandler.post { showOnMain() }
+        }
+    }
+
+    fun hide() {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            hideOnMain()
+        } else {
+            mainHandler.post { hideOnMain() }
+        }
+    }
+
+    private fun showOnMain() {
+        if (rootView != null) {
+            Log.d(TAG, "overlay already showing — skip addView")
+            return
+        }
+        if (!android.provider.Settings.canDrawOverlays(context)) {
+            Log.w(
+                TAG,
+                "SYSTEM_ALERT_WINDOW / canDrawOverlays=false — cannot show lock overlay"
+            )
+            return
+        }
 
         val density = context.resources.displayMetrics.density
         fun dp(v: Int) = (v * density).toInt()
@@ -76,6 +106,9 @@ class LockOverlay(private val context: Context) {
         container.addView(openButton)
 
         val frame = FrameLayout(context).apply {
+            // Consume all touches so the underlying evil app cannot be used.
+            isClickable = true
+            isFocusable = true
             addView(
                 container,
                 FrameLayout.LayoutParams(
@@ -93,13 +126,14 @@ class LockOverlay(private val context: Context) {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
+        // Focusable + touchable (no FLAG_NOT_FOCUSABLE / FLAG_NOT_TOUCHABLE) so the lock
+        // blocks interaction with the app underneath and the "Open ScrollWatcher" button works.
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             type,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -108,18 +142,29 @@ class LockOverlay(private val context: Context) {
         try {
             windowManager.addView(frame, params)
             rootView = frame
-        } catch (_: Exception) {
+            Log.i(TAG, "lock overlay shown")
+        } catch (e: IllegalStateException) {
+            // Already attached somehow — treat as showing.
+            Log.w(TAG, "addView IllegalStateException (already added?): ${e.message}")
+            rootView = frame
+        } catch (e: Exception) {
+            Log.e(TAG, "failed to show lock overlay: ${e.javaClass.simpleName}: ${e.message}", e)
             rootView = null
         }
     }
 
-    fun hide() {
+    private fun hideOnMain() {
         val view = rootView ?: return
         try {
             windowManager.removeView(view)
-        } catch (_: Exception) {
-            // already removed
+            Log.i(TAG, "lock overlay hidden")
+        } catch (e: Exception) {
+            Log.w(TAG, "removeView failed (already removed?): ${e.message}")
         }
         rootView = null
+    }
+
+    companion object {
+        private const val TAG = "ScrollWatcher"
     }
 }

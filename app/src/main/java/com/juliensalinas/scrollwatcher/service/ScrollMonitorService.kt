@@ -161,11 +161,31 @@ class ScrollMonitorService : Service() {
                     val stillEvil = fg != null &&
                         fg != packageName &&
                         refreshed.evilPackages.contains(fg)
-                    if (stillEvil && refreshed.isExhausted &&
-                        PermissionHelper.hasOverlayPermission(this@ScrollMonitorService)
-                    ) {
-                        overlay.show()
+                    val exhausted = refreshed.isExhausted
+                    val shouldLock = stillEvil && exhausted
+
+                    if (shouldLock) {
+                        if (!PermissionHelper.hasOverlayPermission(this@ScrollMonitorService)) {
+                            Log.w(
+                                TAG,
+                                "budget exhausted in evil app fg=$fg but " +
+                                    "SYSTEM_ALERT_WINDOW missing — overlay not shown"
+                            )
+                            overlay.hide()
+                        } else {
+                            Log.i(
+                                TAG,
+                                "showing lock overlay (fg=$fg remaining=${refreshed.remainingMillis})"
+                            )
+                            overlay.show()
+                        }
                     } else {
+                        if (overlay.isShowing) {
+                            Log.d(
+                                TAG,
+                                "hiding lock overlay (stillEvil=$stillEvil exhausted=$exhausted)"
+                            )
+                        }
                         overlay.hide()
                     }
                 } else {
