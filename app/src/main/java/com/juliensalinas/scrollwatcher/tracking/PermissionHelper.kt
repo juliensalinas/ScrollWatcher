@@ -21,7 +21,7 @@ object PermissionHelper {
         Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
             Uri.parse("package:${context.packageName}")
-        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
 
     fun hasNotificationPermission(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
@@ -50,8 +50,9 @@ object PermissionHelper {
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
+    /** Prefer without NEW_TASK so returning from Settings resumes the same Activity cleanly. */
     fun usageAccessSettingsIntent(): Intent =
-        Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
 
     fun isScreenInteractive(context: Context): Boolean {
         val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager

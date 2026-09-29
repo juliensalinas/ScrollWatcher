@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -70,6 +71,24 @@ private sealed class Dest(val route: String, val label: String, val icon: ImageV
     data object Permissions : Dest("permissions", "Permissions", Icons.Filled.Security)
 }
 
+/**
+ * Navigate between top-level bottom-bar destinations.
+ *
+ * Intentionally does NOT use saveState/restoreState: mixing those with an extra
+ * navigate(Permissions) from Home left the UI stuck on Permissions after tapping Home.
+ * Free tab switching is preferred; Permissions shows green checks when granted.
+ */
+private fun NavHostController.navigateTopLevel(route: String) {
+    navigate(route) {
+        popUpTo(graph.findStartDestination().id) {
+            inclusive = false
+            saveState = false
+        }
+        launchSingleTop = true
+        restoreState = false
+    }
+}
+
 @Composable
 private fun ScrollWatcherNav() {
     val navController = rememberNavController()
@@ -83,15 +102,7 @@ private fun ScrollWatcherNav() {
                 destinations.forEach { dest ->
                     NavigationBarItem(
                         selected = currentRoute == dest.route,
-                        onClick = {
-                            navController.navigate(dest.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
+                        onClick = { navController.navigateTopLevel(dest.route) },
                         icon = { Icon(dest.icon, contentDescription = dest.label) },
                         label = { Text(dest.label) },
                     )
@@ -109,7 +120,7 @@ private fun ScrollWatcherNav() {
                 HomeScreen(
                     viewModel = vm,
                     onOpenPermissions = {
-                        navController.navigate(Dest.Permissions.route)
+                        navController.navigateTopLevel(Dest.Permissions.route)
                     },
                 )
             }

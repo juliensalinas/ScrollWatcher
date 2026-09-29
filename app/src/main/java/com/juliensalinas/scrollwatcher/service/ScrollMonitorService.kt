@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.juliensalinas.scrollwatcher.R
 import com.juliensalinas.scrollwatcher.data.BudgetPreferences
@@ -42,6 +43,7 @@ class ScrollMonitorService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Log.i(TAG, "service onCreate — starting foreground + poll loop")
         preferences = BudgetPreferences(applicationContext)
         tracker = ForegroundAppTracker(applicationContext)
         overlay = LockOverlay(applicationContext)
@@ -54,16 +56,20 @@ class ScrollMonitorService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                Log.i(TAG, "service ACTION_STOP")
                 stopSelf()
                 return START_NOT_STICKY
             }
             ACTION_SCREEN_ON -> {
                 screenOn = true
+                Log.d(TAG, "screen ON")
             }
             ACTION_SCREEN_OFF -> {
                 screenOn = false
                 overlay.hide()
+                Log.d(TAG, "screen OFF")
             }
+            else -> Log.d(TAG, "onStartCommand action=${intent?.action}")
         }
         return START_STICKY
     }
@@ -71,6 +77,7 @@ class ScrollMonitorService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        Log.i(TAG, "service onDestroy")
         pollJob?.cancel()
         overlay.hide()
         unregisterScreenReceiver()
@@ -112,6 +119,7 @@ class ScrollMonitorService : Service() {
 
                 if (!state.monitoringEnabled) {
                     overlay.hide()
+                    Log.d(TAG, "monitoring disabled — skipping tick")
                     delay(POLL_INTERVAL_MS)
                     lastTick = System.currentTimeMillis()
                     continue
@@ -121,15 +129,33 @@ class ScrollMonitorService : Service() {
                 val elapsed = (now - lastTick).coerceAtLeast(0L).coerceAtMost(POLL_INTERVAL_MS * 2)
                 lastTick = now
 
-                val interactive = screenOn && PermissionHelper.isScreenInteractive(this@ScrollMonitorService)
-                if (interactive && PermissionHelper.hasUsageAccess(this@ScrollMonitorService)) {
+                val interactive =
+                    screenOn && PermissionHelper.isScreenInteractive(this@ScrollMonitorService)
+                val hasUsage = PermissionHelper.hasUsageAccess(this@ScrollMonitorService)
+
+                if (interactive && hasUsage) {
                     val fg = tracker.currentForegroundPackage()
                     val isEvil = fg != null &&
                         fg != packageName &&
                         state.evilPackages.contains(fg)
+
+                    Log.d(
+                        TAG,
+                        "tick fg=$fg evil=$isEvil evilCount=${state.evilPackages.size} " +
+                            "deltaMs=$elapsed usedMs=${state.usedMillis} " +
+                            "remainingMs=${state.remainingMillis}"
+                    )
+
                     if (isEvil) {
                         preferences.addUsedMillis(elapsed)
+                        val after = preferences.budgetState.first()
+                        Log.i(
+                            TAG,
+                            "added ${elapsed}ms for $fg → used=${after.usedMillis} " +
+                                "remaining=${after.remainingMillis}"
+                        )
                     }
+
                     val refreshed = preferences.budgetState.first()
                     val stillEvil = fg != null &&
                         fg != packageName &&
@@ -142,6 +168,11 @@ class ScrollMonitorService : Service() {
                         overlay.hide()
                     }
                 } else {
+                    if (!interactive) {
+                        Log.d(TAG, "tick skipped: screen not interactive")
+                    } else {
+                        Log.d(TAG, "tick skipped: no usage access")
+                    }
                     overlay.hide()
                 }
 
@@ -186,6 +217,7 @@ class ScrollMonitorService : Service() {
     }
 
     companion object {
+        private const val TAG = "ScrollWatcher"
         const val CHANNEL_ID = "scroll_monitor"
         const val NOTIFICATION_ID = 1001
         const val POLL_INTERVAL_MS = 1500L
@@ -194,15 +226,20 @@ class ScrollMonitorService : Service() {
         const val ACTION_SCREEN_OFF = "com.juliensalinas.scrollwatcher.SCREEN_OFF"
 
         fun start(context: android.content.Context) {
+            Log.i(TAG, "ScrollMonitorService.start()")
             val intent = Intent(context, ScrollMonitorService::class.java)
             ContextCompatStart.start(context, intent)
         }
 
         fun stop(context: android.content.Context) {
+            Log.i(TAG, "ScrollMonitorService.stop()")
             val intent = Intent(context, ScrollMonitorService::class.java).apply {
                 action = ACTION_STOP
             }
-            context.startService(intent)
+            try {
+                context.startService(intent)
+            } catch (_: Exception) {
+            }
             context.stopService(Intent(context, ScrollMonitorService::class.java))
         }
     }

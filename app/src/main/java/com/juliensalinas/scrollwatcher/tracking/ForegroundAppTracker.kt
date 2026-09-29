@@ -10,16 +10,25 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import android.util.Log
 import com.juliensalinas.scrollwatcher.data.InstalledApp
 
 /**
- * Reads the current foreground package via UsageStatsManager (UsageEvents).
+ * Reads the current foreground package via UsageStatsManager (UsageEvents + UsageStats fallback).
  * Does NOT use AccessibilityService.
+ *
+ * Important: ACTIVITY_RESUMED only fires when an activity starts/resumes. A short lookback
+ * window wrongly returns null while the user keeps scrolling the same activity for > lookback.
+ * We use a multi-minute lookback and keep the last resume as the foreground package.
  */
 class ForegroundAppTracker(private val context: Context) {
 
     private val usageStatsManager =
         context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+
+    /** Last package we observed via ACTIVITY_RESUMED / MOVE_TO_FOREGROUND. */
+    @Volatile
+    private var cachedForeground: String? = null
 
     fun hasUsageAccess(): Boolean {
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
@@ -41,29 +50,103 @@ class ForegroundAppTracker(private val context: Context) {
     }
 
     fun usageAccessSettingsIntent(): Intent =
-        Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
 
     /**
-     * Returns the package name of the most recent MOVE_TO_FOREGROUND / ACTIVITY_RESUMED event
-     * within the lookback window, or null if unknown / no permission.
+     * Returns the package name of the most recent foreground activity, or null if unknown /
+     * no permission.
      */
-    fun currentForegroundPackage(lookbackMs: Long = 10_000L): String? {
-        if (!hasUsageAccess()) return null
+    fun currentForegroundPackage(lookbackMs: Long = DEFAULT_LOOKBACK_MS): String? {
+        if (!hasUsageAccess()) {
+            Log.d(TAG, "currentForegroundPackage: no usage access")
+            cachedForeground = null
+            return null
+        }
+
+        val fromEvents = foregroundFromEvents(lookbackMs)
+        if (fromEvents != null) {
+            cachedForeground = fromEvents
+            return fromEvents
+        }
+
+        val fromStats = foregroundFromUsageStats(lookbackMs)
+        if (fromStats != null) {
+            cachedForeground = fromStats
+            return fromStats
+        }
+
+        // No new events in the window (can happen briefly between polls). Keep last known
+        // only if we have one — safer than inventing a package.
+        Log.d(
+            TAG,
+            "currentForegroundPackage: no events/stats in lookback=${lookbackMs}ms, " +
+                "cached=$cachedForeground"
+        )
+        return cachedForeground
+    }
+
+    private fun foregroundFromEvents(lookbackMs: Long): String? {
         val end = System.currentTimeMillis()
         val begin = end - lookbackMs
-        val events = usageStatsManager.queryEvents(begin, end) ?: return null
+        val events = try {
+            usageStatsManager.queryEvents(begin, end)
+        } catch (e: Exception) {
+            Log.w(TAG, "queryEvents failed: ${e.message}")
+            return null
+        } ?: return null
+
         val event = UsageEvents.Event()
         var foreground: String? = null
+        var eventCount = 0
+        var resumeCount = 0
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
+            eventCount++
             @Suppress("DEPRECATION")
             val isFg = event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
                 event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND
-            if (isFg) {
+            if (isFg && !event.packageName.isNullOrBlank()) {
                 foreground = event.packageName
+                resumeCount++
             }
         }
+        Log.d(
+            TAG,
+            "foregroundFromEvents: events=$eventCount resumes=$resumeCount fg=$foreground"
+        )
         return foreground
+    }
+
+    /**
+     * Fallback: package with the most recent lastTimeUsed within the lookback window.
+     * Less precise than UsageEvents but helps on OEMs that batch or delay events.
+     */
+    private fun foregroundFromUsageStats(lookbackMs: Long): String? {
+        val end = System.currentTimeMillis()
+        val begin = end - lookbackMs
+        val stats = try {
+            usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_BEST,
+                begin,
+                end
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "queryUsageStats failed: ${e.message}")
+            return null
+        }
+        if (stats.isNullOrEmpty()) {
+            Log.d(TAG, "foregroundFromUsageStats: empty")
+            return null
+        }
+        val recent = stats
+            .filter { it.lastTimeUsed >= begin && !it.packageName.isNullOrBlank() }
+            .maxByOrNull { it.lastTimeUsed }
+        Log.d(
+            TAG,
+            "foregroundFromUsageStats: candidates=${stats.size} fg=${recent?.packageName} " +
+                "lastUsed=${recent?.lastTimeUsed}"
+        )
+        return recent?.packageName
     }
 
     fun listLaunchableApps(): List<InstalledApp> {
@@ -88,5 +171,11 @@ class ForegroundAppTracker(private val context: Context) {
             }
             .distinctBy { it.packageName }
             .sortedBy { it.label.lowercase() }
+    }
+
+    companion object {
+        private const val TAG = "ScrollWatcher"
+        /** Multi-minute lookback so continuous scrolling still resolves the FG package. */
+        const val DEFAULT_LOOKBACK_MS: Long = 120_000L
     }
 }

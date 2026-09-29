@@ -30,16 +30,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.juliensalinas.scrollwatcher.tracking.PermissionHelper
 
 @Composable
 fun PermissionsScreen() {
     val context = LocalContext.current
+    // Prefer the Activity lifecycle so returning from Settings always refreshes checks,
+    // even if the NavBackStackEntry lifecycle is quirky across process/task switches.
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var usageOk by remember { mutableStateOf(PermissionHelper.hasUsageAccess(context)) }
@@ -54,7 +56,9 @@ fun PermissionsScreen() {
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) refresh()
+            if (event == Lifecycle.Event.ON_RESUME || event == Lifecycle.Event.ON_START) {
+                refresh()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -125,7 +129,8 @@ fun PermissionsScreen() {
 
         Spacer(Modifier.height(24.dp))
         Text(
-            text = "Tip: after granting Usage Access, return here — the checklist refreshes on resume.",
+            text = "Tip: after granting a permission, return here — the checklist refreshes on resume. " +
+                "You can switch to Home anytime from the bottom bar.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
         )

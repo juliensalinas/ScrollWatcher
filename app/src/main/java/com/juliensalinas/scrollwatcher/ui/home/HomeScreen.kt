@@ -42,6 +42,7 @@ fun HomeScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshPermissions()
+                viewModel.ensureMonitorRunning()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

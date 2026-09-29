@@ -1,6 +1,7 @@
 package com.juliensalinas.scrollwatcher.ui.home
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.juliensalinas.scrollwatcher.ScrollWatcherApp
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -33,6 +35,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch { prefs.ensureDailyReset() }
         refreshPermissions()
+        ensureMonitorRunning()
     }
 
     fun refreshPermissions() {
@@ -57,6 +60,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 ScrollMonitorService.stop(ctx)
             }
+            Log.i(TAG, "setMonitoring enabled=$enabled")
         }
+    }
+
+    /** If monitoring is enabled in prefs, (re)start the FGS — covers process death / missed start. */
+    fun ensureMonitorRunning() {
+        viewModelScope.launch {
+            prefs.ensureDailyReset()
+            val state = prefs.budgetState.first()
+            if (state.monitoringEnabled) {
+                Log.i(TAG, "ensureMonitorRunning: starting service")
+                ScrollMonitorService.start(getApplication())
+            }
+        }
+    }
+
+    companion object {
+        private const val TAG = "ScrollWatcher"
     }
 }
